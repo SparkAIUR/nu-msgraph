@@ -62,6 +62,24 @@ class MSGraphClient:
             config: Configuration object. If None, loads from environment.
         """
         self.config = config or MSGraphConfig()
+        self._http_client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> "MSGraphClient":
+        """Enter async context manager."""
+        self._http_client = httpx.AsyncClient()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit async context manager."""
+        if self._http_client:
+            await self._http_client.aclose()
+            self._http_client = None
+
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        if self._http_client:
+            await self._http_client.aclose()
+            self._http_client = None
 
     @property
     def is_configured(self) -> bool:

@@ -12,17 +12,17 @@ async def send_test():
     print("MS Graph Email Send Test")
     print("=" * 50)
     print(f"From: {config.from_address}")
-    print(f"To: jsavage@flipcofinancial.com")
+    print(f"To: {config.from_address} (self)")
     print()
     
     client = MSGraphClient(config)
     
     print("Sending test email...")
     result = await client.send_email(
-        to_address="jsavage@flipcofinancial.com",
-        subject="[TEST] nu-msgraph Library Test",
-        body_html="<h1>Hello!</h1><p>This is a test email from the <b>nu-msgraph</b> library.</p><p>If you received this, the integration is working correctly!</p>",
-        body_text="Hello! This is a test email from the nu-msgraph library.",
+        to_address=config.from_address,  # Send to self to trigger webhook
+        subject="[TEST] nu-msgraph Webhook Test",
+        body_html="<h1>Webhook Test</h1><p>This email should trigger a webhook notification!</p>",
+        body_text="Webhook Test - This email should trigger a webhook notification!",
     )
     print()
     print("✅ Email sent successfully!")

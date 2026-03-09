@@ -88,3 +88,4 @@ Thumbs.db
 *.key
 *.crt
 certificates/
+uv.lock

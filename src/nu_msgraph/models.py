@@ -37,6 +37,16 @@ class EmailBody(BaseModel):
     content: str = ""
 
 
+class EmailAttachment(BaseModel):
+    """File attachment content accepted by Microsoft Graph ``sendMail``."""
+
+    name: str
+    content_bytes: bytes
+    content_type: str = "application/octet-stream"
+    content_id: str | None = None
+    is_inline: bool = False
+
+
 class EmailMessage(BaseModel):
     """Email message model."""
 

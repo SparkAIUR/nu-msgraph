@@ -1,16 +1,17 @@
 """Tests for MSGraphClient."""
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 
 from nu_msgraph import (
+    EmailAttachment,
+    MSGraphAuthError,
     MSGraphClient,
     MSGraphConfig,
-    MSGraphError,
-    MSGraphAuthError,
     MSGraphConfigError,
+    MSGraphError,
     MSGraphNetworkError,
 )
 
@@ -231,6 +232,66 @@ class TestMSGraphClientSendEmail:
             payload = call_args.kwargs["json"]
             assert payload["message"]["body"]["contentType"] == "HTML"
             assert payload["message"]["body"]["content"] == "<h1>Hello</h1>"
+
+    @pytest.mark.asyncio
+    async def test_send_email_supports_multiple_recipients_and_attachments(
+        self, client, mock_token_response
+    ):
+        """Build the Graph payload for all recipients and file attachments."""
+        MSGraphClient.clear_token_cache()
+
+        token_response = MagicMock(status_code=200)
+        token_response.json.return_value = mock_token_response
+        send_response = MagicMock(status_code=202)
+        send_response.headers = {"request-id": "multi-request-id"}
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_http = AsyncMock()
+            mock_http.post.side_effect = [token_response, send_response]
+            mock_client.return_value.__aenter__.return_value = mock_http
+
+            result = await client.send_email(
+                to_addresses=["one@test.com", "two@test.com"],
+                cc_addresses=["copy@test.com"],
+                subject="Documents",
+                body_text="Attached",
+                attachments=[
+                    EmailAttachment(
+                        name="hello.txt",
+                        content_type="text/plain",
+                        content_bytes=b"hello",
+                    )
+                ],
+                client_request_id="correlation-id",
+            )
+
+        payload = mock_http.post.call_args_list[1].kwargs["json"]
+        assert payload["message"]["toRecipients"] == [
+            {"emailAddress": {"address": "one@test.com"}},
+            {"emailAddress": {"address": "two@test.com"}},
+        ]
+        assert payload["message"]["ccRecipients"] == [
+            {"emailAddress": {"address": "copy@test.com"}}
+        ]
+        assert payload["message"]["attachments"] == [
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": "hello.txt",
+                "contentType": "text/plain",
+                "contentBytes": "aGVsbG8=",
+                "isInline": False,
+            }
+        ]
+        headers = mock_http.post.call_args_list[1].kwargs["headers"]
+        assert headers["client-request-id"] == "correlation-id"
+        assert headers["return-client-request-id"] == "true"
+        assert result["request_id"] == "multi-request-id"
+        assert result["to_addresses"] == ["one@test.com", "two@test.com"]
+
+    @pytest.mark.asyncio
+    async def test_send_email_requires_a_recipient(self, client):
+        with pytest.raises(MSGraphConfigError, match="At least one recipient"):
+            await client.send_email(subject="Missing", body_text="No recipient")
 
 
 class TestMSGraphClientListMessages:

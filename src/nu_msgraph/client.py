@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from base64 import b64encode
 from typing import Any
 
 import httpx
@@ -23,6 +24,7 @@ from nu_msgraph.exceptions import (
     MSGraphError,
     MSGraphNetworkError,
 )
+from nu_msgraph.models import EmailAttachment
 
 
 class MSGraphClient:
@@ -251,28 +253,34 @@ class MSGraphClient:
     async def send_email(
         self,
         *,
-        to_address: str,
+        to_address: str | None = None,
+        to_addresses: list[str] | None = None,
         subject: str,
         body_text: str,
         body_html: str | None = None,
         from_address: str | None = None,
         cc_addresses: list[str] | None = None,
         bcc_addresses: list[str] | None = None,
+        attachments: list[EmailAttachment] | None = None,
         reply_to_address: str | None = None,
+        client_request_id: str | None = None,
         importance: str = "normal",
         save_to_sent_items: bool = True,
     ) -> dict[str, Any]:
         """Send an email via Microsoft Graph API.
         
         Args:
-            to_address: Recipient email address.
+            to_address: One recipient email address (backwards-compatible shortcut).
+            to_addresses: Optional list of recipient email addresses.
             subject: Email subject line.
             body_text: Plain text body content.
             body_html: Optional HTML body content (overrides body_text if provided).
             from_address: Sender address (defaults to configured from_address).
             cc_addresses: Optional list of CC recipients.
             bcc_addresses: Optional list of BCC recipients.
+            attachments: Optional file attachments whose bytes are encoded for Graph.
             reply_to_address: Optional reply-to address.
+            client_request_id: Optional caller-generated correlation identifier.
             importance: Email importance: "low", "normal", or "high".
             save_to_sent_items: Whether to save email to Sent Items folder.
             
@@ -290,6 +298,8 @@ class MSGraphClient:
         if not sender:
             raise MSGraphConfigError("No sender email address configured")
 
+        recipients = self._merge_recipients(to_address, to_addresses)
+
         # Build message payload
         message: dict[str, Any] = {
             "subject": subject,
@@ -297,7 +307,9 @@ class MSGraphClient:
                 "contentType": "HTML" if body_html else "Text",
                 "content": body_html or body_text,
             },
-            "toRecipients": [{"emailAddress": {"address": to_address}}],
+            "toRecipients": [
+                {"emailAddress": {"address": address}} for address in recipients
+            ],
             "importance": importance,
         }
 
@@ -315,6 +327,11 @@ class MSGraphClient:
         if reply_to_address:
             message["replyTo"] = [{"emailAddress": {"address": reply_to_address}}]
 
+        if attachments:
+            message["attachments"] = [
+                self._build_file_attachment(attachment) for attachment in attachments
+            ]
+
         # Build request payload
         payload = {
             "message": message,
@@ -324,6 +341,9 @@ class MSGraphClient:
         # Get access token
         token = await self._get_access_token()
         headers = self._build_headers(token)
+        if client_request_id:
+            headers["client-request-id"] = client_request_id
+            headers["return-client-request-id"] = "true"
 
         # Send the email
         url = f"{self.GRAPH_API_BASE}/users/{sender}/sendMail"
@@ -334,15 +354,17 @@ class MSGraphClient:
 
                 # 202 Accepted is the expected response for sendMail
                 if response.status_code in (200, 202):
-                    request_id = response.headers.get("request-id", "")
+                    request_id = response.headers.get("request-id", client_request_id or "")
                     logger.info(
                         f"MS Graph email sent, request_id={request_id}, "
-                        f"recipient={self._mask_email(to_address)}"
+                        f"recipient={self._mask_email(recipients[0])}, "
+                        f"recipient_count={len(recipients)}"
                     )
                     return {
                         "status": "sent",
                         "request_id": request_id,
-                        "to": to_address,
+                        "to": recipients[0],
+                        "to_addresses": recipients,
                         "subject": subject,
                     }
 
@@ -358,6 +380,41 @@ class MSGraphClient:
         except httpx.RequestError as e:
             logger.error(f"MS Graph send request failed: {e}")
             raise MSGraphNetworkError(f"Send request failed: {e}") from e
+
+    @staticmethod
+    def _merge_recipients(
+        to_address: str | None, to_addresses: list[str] | None
+    ) -> list[str]:
+        """Combine the legacy single recipient with the multi-recipient API."""
+
+        recipients = ([to_address] if to_address is not None else []) + (to_addresses or [])
+        normalized = [address.strip() for address in recipients if address.strip()]
+        if not normalized:
+            raise MSGraphConfigError("At least one recipient email address is required")
+
+        deduplicated: list[str] = []
+        seen: set[str] = set()
+        for address in normalized:
+            key = address.casefold()
+            if key not in seen:
+                seen.add(key)
+                deduplicated.append(address)
+        return deduplicated
+
+    @staticmethod
+    def _build_file_attachment(attachment: EmailAttachment) -> dict[str, Any]:
+        """Convert attachment bytes to the Microsoft Graph fileAttachment shape."""
+
+        result: dict[str, Any] = {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": attachment.name,
+            "contentType": attachment.content_type,
+            "contentBytes": b64encode(attachment.content_bytes).decode("ascii"),
+            "isInline": attachment.is_inline,
+        }
+        if attachment.content_id:
+            result["contentId"] = attachment.content_id
+        return result
 
     async def get_user_info(self, user_email: str | None = None) -> dict[str, Any]:
         """Get user information from Graph API.

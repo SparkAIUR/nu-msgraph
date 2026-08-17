@@ -299,6 +299,8 @@ class MSGraphClient:
             raise MSGraphConfigError("No sender email address configured")
 
         recipients = self._merge_recipients(to_address, to_addresses)
+        normalized_cc_addresses = self._normalize_recipients(cc_addresses)
+        normalized_bcc_addresses = self._normalize_recipients(bcc_addresses)
 
         # Build message payload
         message: dict[str, Any] = {
@@ -314,14 +316,14 @@ class MSGraphClient:
         }
 
         # Add optional recipients
-        if cc_addresses:
+        if normalized_cc_addresses:
             message["ccRecipients"] = [
-                {"emailAddress": {"address": addr}} for addr in cc_addresses
+                {"emailAddress": {"address": addr}} for addr in normalized_cc_addresses
             ]
 
-        if bcc_addresses:
+        if normalized_bcc_addresses:
             message["bccRecipients"] = [
-                {"emailAddress": {"address": addr}} for addr in bcc_addresses
+                {"emailAddress": {"address": addr}} for addr in normalized_bcc_addresses
             ]
 
         if reply_to_address:
@@ -388,9 +390,17 @@ class MSGraphClient:
         """Combine the legacy single recipient with the multi-recipient API."""
 
         recipients = ([to_address] if to_address is not None else []) + (to_addresses or [])
-        normalized = [address.strip() for address in recipients if address.strip()]
+        normalized = MSGraphClient._normalize_recipients(recipients)
         if not normalized:
             raise MSGraphConfigError("At least one recipient email address is required")
+
+        return normalized
+
+    @staticmethod
+    def _normalize_recipients(addresses: list[str] | None) -> list[str]:
+        """Trim, remove blank entries, and deduplicate addresses case-insensitively."""
+
+        normalized = [address.strip() for address in addresses or [] if address.strip()]
 
         deduplicated: list[str] = []
         seen: set[str] = set()

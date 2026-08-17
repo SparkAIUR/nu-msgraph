@@ -252,7 +252,8 @@ class TestMSGraphClientSendEmail:
 
             result = await client.send_email(
                 to_addresses=["one@test.com", "two@test.com"],
-                cc_addresses=["copy@test.com"],
+                cc_addresses=[" copy@test.com ", "COPY@test.com", "   "],
+                bcc_addresses=["blind@test.com", " BLIND@test.com ", ""],
                 subject="Documents",
                 body_text="Attached",
                 attachments=[
@@ -272,6 +273,9 @@ class TestMSGraphClientSendEmail:
         ]
         assert payload["message"]["ccRecipients"] == [
             {"emailAddress": {"address": "copy@test.com"}}
+        ]
+        assert payload["message"]["bccRecipients"] == [
+            {"emailAddress": {"address": "blind@test.com"}}
         ]
         assert payload["message"]["attachments"] == [
             {

@@ -37,6 +37,7 @@ from nu_msgraph.exceptions import (
 from nu_msgraph.models import (
     ChangeNotification,
     EmailAddress,
+    EmailAttachment,
     EmailBody,
     EmailMessage,
     EmailRecipient,
@@ -77,6 +78,7 @@ __all__ = [
     # Models
     "ChangeNotification",
     "EmailAddress",
+    "EmailAttachment",
     "EmailBody",
     "EmailMessage",
     "EmailRecipient",
